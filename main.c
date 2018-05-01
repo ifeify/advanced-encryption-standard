@@ -1,6 +1,7 @@
 #define STATE_MATRIX_SIZE 4
 #define NUM_CHARS_BLKSZ_128 16
 #define TERMINAL_CHAR '\r'
+#define ERROR_COMMAND_LINE_ARGS -2
 
 #include <stdio.h>
 #include <unistd.h>
@@ -42,7 +43,7 @@ void pad_string_128(char* str) {
     }
 }
 
-void pretty_print_int_matrix(unsigned int state[][STATE_MATRIX_SIZE]) {
+void pretty_print_int_matrix(unsigned char state[][STATE_MATRIX_SIZE]) {
     int row, col = 0;
     for(row = 0; row < STATE_MATRIX_SIZE; row++) {
         printf("{");
@@ -54,7 +55,7 @@ void pretty_print_int_matrix(unsigned int state[][STATE_MATRIX_SIZE]) {
     printf("\n");
 }
 
-void pretty_print_hex_matrix(unsigned int state[][STATE_MATRIX_SIZE]) {
+void pretty_print_hex_matrix(unsigned char state[][STATE_MATRIX_SIZE]) {
     int row, col = 0;
     for(row = 0; row < STATE_MATRIX_SIZE; row++) {
         printf("{");
@@ -66,25 +67,11 @@ void pretty_print_hex_matrix(unsigned int state[][STATE_MATRIX_SIZE]) {
     printf("\n");
 }
 
-unsigned int char_to_hex(char ch) {
-    if(isdigit(ch)) {
-        return ch - '0';
-    } else if(isupper(ch)) {
-        return ch - 'A';
-    } else if(islower(ch)) {
-        return ch - 'a';
-    } else if(iscntrl(ch)) {
-        return ch - '\0';
-    } else {
-        // TODO: fix for non control, digit, upper and lower case letters
-        return ch;
-    }
-}
 /**
  * Fills the state matrix from the ASCII string provided. Note that this function
  * should only be used for 128 bit blocks (so only strings with 16 characters will work)
 **/
-void ascii_to_hex_128(const char* str, unsigned int state[][STATE_MATRIX_SIZE]) {
+void ascii_to_hex_128(const char* str, unsigned char state[][STATE_MATRIX_SIZE]) {
     int i;
     int row = -1;
     int col = 0;
@@ -92,7 +79,7 @@ void ascii_to_hex_128(const char* str, unsigned int state[][STATE_MATRIX_SIZE]) 
 
     for(i = 0; i < len; i++) {
         ++row;
-        state[row][col] = char_to_hex(str[i]);
+        state[row][col] = (int)str[i];
         if(row == STATE_MATRIX_SIZE - 1) {
             row = -1;
             ++col;
@@ -109,15 +96,21 @@ int main(int argc, char const *argv[]) {
     // file to encrypt
     char* file_name = "";
 
-    unsigned int key_state[4][4];
-    unsigned int cipher_state[4][4];
+    unsigned char key_state[4][4];
+    unsigned char cipher_state[4][4];
 
     parse_command_line_args(argc, argv, key, plain_text);
+    if(strlen(plain_text) > 100 || strlen(key) > NUM_CHARS_BLKSZ_128) {
+        printf("Plaintext cannot be more than 100 characters.\n");
+        printf("Encryption key cannot be more than %d characters", NUM_CHARS_BLKSZ_128);
+        exit(ERROR_COMMAND_LINE_ARGS);
+    }
+
     printf("\nEncryption key is %s and the plaintext is %s\n", key, plain_text);
 
     pad_string_128(key);
     ascii_to_hex_128(key, key_state);
-    pretty_print_hex_matrix(key_state);
+    pretty_print_int_matrix(key_state);
     // ascii_to_hex(plain_text, cipher_state);
 
     return 0;
