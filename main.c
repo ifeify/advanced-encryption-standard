@@ -1,5 +1,6 @@
 #define STATE_MATRIX_SIZE 4
 #define NUM_CHARS_BLKSZ_128 16
+#define AES_128_ROUNDS 16
 #define TERMINAL_CHAR '\r'
 #define ERROR_COMMAND_LINE_ARGS -2
 
@@ -8,6 +9,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include "util.h"
 
 void parse_command_line_args(int argc, char const* argv[], char* key, char* plain_text) {
     int opt = 0;
@@ -70,14 +72,14 @@ void pretty_print_hex_matrix(unsigned char state[][STATE_MATRIX_SIZE]) {
 /**
  * Fills the state matrix from the ASCII string provided. Note that this function
  * should only be used for 128 bit blocks (so only strings with 16 characters will work)
+ @param len - is the length of the input string
 **/
-void ascii_to_hex_128(const char* str, unsigned char state[][STATE_MATRIX_SIZE]) {
+void ascii_to_hex_128(const char* str, int offset, int len, unsigned char state[][STATE_MATRIX_SIZE]) {
     int i;
     int row = -1;
     int col = 0;
-    int len = strlen(str);
 
-    for(i = 0; i < len; i++) {
+    for(i = offset; i < (offset + len); i++) {
         ++row;
         state[row][col] = (int)str[i];
         if(row == STATE_MATRIX_SIZE - 1) {
@@ -85,6 +87,22 @@ void ascii_to_hex_128(const char* str, unsigned char state[][STATE_MATRIX_SIZE])
             ++col;
         }
     }
+}
+
+void sub_bytes_transform(unsigned char cipher_state[][STATE_MATRIX_SIZE]) {
+    int row, col = 0;
+    for(col = 0; col < STATE_MATRIX_SIZE; col++) {
+        for(row = 0; row < STATE_MATRIX_SIZE; row++) {
+            char val = cipher_state[row][col];
+            int bottom_half = val & 0x0f;
+            int top_half = (val & 0xf0) >> 4;
+            cipher_state[row][col] = AES_SBOX[top_half * NUM_CHARS_BLKSZ_128 + bottom_half];
+        }
+    }
+}
+
+void aes_encrypt(unsigned char key_state[][STATE_MATRIX_SIZE], unsigned char cipher_state[][STATE_MATRIX_SIZE]) {
+    sub_bytes_transform(cipher_state);
 }
 
 int main(int argc, char const *argv[]) {
@@ -109,9 +127,26 @@ int main(int argc, char const *argv[]) {
     printf("\nEncryption key is %s and the plaintext is %s\n", key, plain_text);
 
     pad_string_128(key);
-    ascii_to_hex_128(key, key_state);
+    ascii_to_hex_128(key, 0, strlen(key), key_state);
     pretty_print_int_matrix(key_state);
-    // ascii_to_hex(plain_text, cipher_state);
+
+    int pos = 0;
+    // take the plaintext 16 characters at a time since each AES block is 128 bits long
+    while(pos < strlen(plain_text)) {
+        printf("\nPlaintext block is: %.*s\n", NUM_CHARS_BLKSZ_128, plain_text + pos);
+        ascii_to_hex_128(plain_text, pos, NUM_CHARS_BLKSZ_128, cipher_state);
+
+        printf("\nBefore subbytes\n");
+        pretty_print_hex_matrix(cipher_state);
+
+        printf("\nAfter subbytes\n");
+        aes_encrypt(key_state, cipher_state);
+        pretty_print_hex_matrix(cipher_state);
+
+        pos += NUM_CHARS_BLKSZ_128;
+        memset(cipher_state, 0, sizeof(cipher_state));
+    }
+
 
     return 0;
 }
