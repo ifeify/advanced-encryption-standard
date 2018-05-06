@@ -101,8 +101,46 @@ void sub_bytes_transform(unsigned char cipher_state[][STATE_MATRIX_SIZE]) {
     }
 }
 
+void left_rotate_once(unsigned char* array, int len) {
+    char temp = array[0];
+    int i;
+    for(i = 0; i < len - 1; i++) {
+        array[i] = array[i + 1];
+    }
+    // i is len - 1 at this point
+    array[i] = temp;
+}
+
+/**
+ * Performs a circular left rotate of the array
+**/
+void left_rotate(unsigned char* array, int len, int num_rotations) {
+    int i;
+    for(i = 0; i < num_rotations; i++) {
+        left_rotate_once(array, len);
+    }
+}
+
+void shift_rows(unsigned char cipher_state[][STATE_MATRIX_SIZE]) {
+    // rotate left by row number.
+    // We're passing the address of the first element in each row
+    left_rotate(&cipher_state[1][0], STATE_MATRIX_SIZE, 1);
+    left_rotate(&cipher_state[2][0], STATE_MATRIX_SIZE, 2);
+    left_rotate(&cipher_state[3][0], STATE_MATRIX_SIZE, 3);
+}
+
+void add_round_key(unsigned char cipher_state[][STATE_MATRIX_SIZE], unsigned char round_key[][STATE_MATRIX_SIZE]) {
+    int row, col;
+    for(row = 0; row < STATE_MATRIX_SIZE; row++) {
+        for(col = 0; col < STATE_MATRIX_SIZE; col++) {
+            cipher_state[row][col] = cipher_state[row][col] ^ round_key[row][col];
+        }
+    }
+}
+
 void aes_encrypt(unsigned char key_state[][STATE_MATRIX_SIZE], unsigned char cipher_state[][STATE_MATRIX_SIZE]) {
     sub_bytes_transform(cipher_state);
+    shift_rows(cipher_state);
 }
 
 int main(int argc, char const *argv[]) {
@@ -128,7 +166,6 @@ int main(int argc, char const *argv[]) {
 
     pad_string_128(key);
     ascii_to_hex_128(key, 0, strlen(key), key_state);
-    pretty_print_int_matrix(key_state);
 
     int pos = 0;
     // take the plaintext 16 characters at a time since each AES block is 128 bits long
@@ -140,7 +177,11 @@ int main(int argc, char const *argv[]) {
         pretty_print_hex_matrix(cipher_state);
 
         printf("\nAfter subbytes\n");
-        aes_encrypt(key_state, cipher_state);
+        sub_bytes_transform(cipher_state);
+        pretty_print_hex_matrix(cipher_state);
+
+        printf("\nAfter shift rows\n");
+        shift_rows(cipher_state);
         pretty_print_hex_matrix(cipher_state);
 
         pos += NUM_CHARS_BLKSZ_128;
