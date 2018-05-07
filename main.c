@@ -1,5 +1,7 @@
 #define STATE_MATRIX_SIZE 4
 #define NUM_CHARS_BLKSZ_128 16
+#define MAX_CHARS_PLAINTEXT 120
+#define MAX_CHARS_CIPHERTEXT 128
 #define AES_128_ROUNDS 10
 #define TERMINAL_CHAR '\0'
 #define ERROR_COMMAND_LINE_ARGS -2
@@ -206,7 +208,8 @@ int main(int argc, char const *argv[]) {
     // Additional is for the null character
     char key[17] = "";
     // max plaintext size is 100 (otherwise read from file)
-    char plain_text[100] = "";
+    char plain_text[MAX_CHARS_PLAINTEXT] = "";
+    char cipher_text[MAX_CHARS_CIPHERTEXT] = "";
     // file to encrypt
     char* file_name = "";
 
@@ -215,8 +218,8 @@ int main(int argc, char const *argv[]) {
     unsigned char cipher_state[4][4];
 
     parse_command_line_args(argc, argv, key, plain_text);
-    if(strlen(plain_text) > 100 || strlen(key) > NUM_CHARS_BLKSZ_128) {
-        printf("Plaintext cannot be more than 100 characters.\n");
+    if(strlen(plain_text) > MAX_CHARS_PLAINTEXT || strlen(key) > NUM_CHARS_BLKSZ_128) {
+        printf("Plaintext cannot be more than %d characters long.\n", MAX_CHARS_PLAINTEXT);
         printf("Encryption key cannot be more than %d characters", NUM_CHARS_BLKSZ_128);
         exit(ERROR_COMMAND_LINE_ARGS);
     }
@@ -256,7 +259,5 @@ int main(int argc, char const *argv[]) {
         printf("Round %d Key:\n", i);
         pretty_print_hex_matrix(key_state);
     }
-
-
     return 0;
 }
