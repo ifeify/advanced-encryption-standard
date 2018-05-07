@@ -1,7 +1,7 @@
 #define STATE_MATRIX_SIZE 4
 #define NUM_CHARS_BLKSZ_128 16
-#define AES_128_ROUNDS 16
-#define TERMINAL_CHAR '\r'
+#define AES_128_ROUNDS 10
+#define TERMINAL_CHAR '\0'
 #define ERROR_COMMAND_LINE_ARGS -2
 
 #include <stdio.h>
@@ -129,6 +129,64 @@ void shift_rows(unsigned char cipher_state[][STATE_MATRIX_SIZE]) {
     left_rotate(&cipher_state[3][0], STATE_MATRIX_SIZE, 3);
 }
 
+/**
+ * @param temp_key is an array of size 4
+ *
+**/
+void get_round_temp_key(unsigned char* temp_key, int round_number) {
+    left_rotate_once(temp_key, STATE_MATRIX_SIZE);
+    int i;
+    for(i = 0; i < STATE_MATRIX_SIZE; i++) {
+        char val = temp_key[i];
+        int bottom_half = val & 0x0f;
+        int top_half = (val & 0xf0) >> 4;
+        temp_key[i] = AES_SBOX[top_half * NUM_CHARS_BLKSZ_128 + bottom_half];
+    }
+
+    temp_key[0] = temp_key[0] ^ ROUND_CONSTANT[round_number];
+}
+
+void next_round_key(unsigned char (*round_key)[STATE_MATRIX_SIZE],
+                                                    int round_number) {
+    unsigned char temp_round_key[4] = {0};
+
+    // the last column in the state key will be used to generate the temp round key
+    temp_round_key[0] = *(*(round_key + 0) + 3);
+    temp_round_key[1] = *(*(round_key + 1) + 3);
+    temp_round_key[2] = *(*(round_key + 2) + 3);
+    temp_round_key[3] = *(*(round_key + 3) + 3);
+
+    get_round_temp_key(temp_round_key, round_number);
+
+    // generate first column from temp round key and part of the key (i.e. word)
+    // from the previous round
+    *(*(round_key)) = *(*(round_key)) ^ temp_round_key[0];
+    *(*(round_key + 1)) = *(*(round_key + 1)) ^ temp_round_key[1];
+    *(*(round_key + 2)) = *(*(round_key + 2)) ^ temp_round_key[2];
+    *(*(round_key + 3)) = *(*(round_key + 3)) ^ temp_round_key[3];
+
+    // generate 2nd column from previous column and part of the key (i.e word)
+    // from the previous round
+    *(*(round_key) + 1) = *(*(round_key) + 1) ^ *(*(round_key));
+    *(*(round_key + 1) + 1) = *(*(round_key + 1) + 1) ^ *(*(round_key + 1));
+    *(*(round_key + 2) + 1) = *(*(round_key + 2) + 1) ^ *(*(round_key + 2));
+    *(*(round_key + 3) + 1) = *(*(round_key + 3) + 1) ^ *(*(round_key + 3));
+
+    // generate 3rd column from previous column and part of the key (i.e word)
+    // from the previous round
+    *(*(round_key) + 2) = *(*(round_key) + 2) ^ *(*(round_key) + 1);
+    *(*(round_key + 1) + 2) = *(*(round_key + 1) + 2) ^ *(*(round_key + 1) + 1);
+    *(*(round_key + 2) + 2) = *(*(round_key + 2) + 2) ^ *(*(round_key + 2) + 1);
+    *(*(round_key + 3) + 2) = *(*(round_key + 3) + 2) ^ *(*(round_key + 3) + 1);
+
+    // generate 4th column from previous column and part of the key (i.e word)
+    // from the previous round
+    *(*(round_key) + 3) = *(*(round_key) + 3) ^ *(*(round_key) + 2);
+    *(*(round_key + 1) + 3) = *(*(round_key + 1) + 3) ^ *(*(round_key + 1) + 2);
+    *(*(round_key + 2) + 3) = *(*(round_key + 2) + 3) ^ *(*(round_key + 2) + 2);
+    *(*(round_key + 3) + 3) = *(*(round_key + 3) + 3) ^ *(*(round_key + 3) + 2);
+}
+
 void add_round_key(unsigned char cipher_state[][STATE_MATRIX_SIZE], unsigned char round_key[][STATE_MATRIX_SIZE]) {
     int row, col;
     for(row = 0; row < STATE_MATRIX_SIZE; row++) {
@@ -153,6 +211,7 @@ int main(int argc, char const *argv[]) {
     char* file_name = "";
 
     unsigned char key_state[4][4];
+    unsigned char round_key[4][4];
     unsigned char cipher_state[4][4];
 
     parse_command_line_args(argc, argv, key, plain_text);
@@ -169,23 +228,33 @@ int main(int argc, char const *argv[]) {
 
     int pos = 0;
     // take the plaintext 16 characters at a time since each AES block is 128 bits long
-    while(pos < strlen(plain_text)) {
-        printf("\nPlaintext block is: %.*s\n", NUM_CHARS_BLKSZ_128, plain_text + pos);
-        ascii_to_hex_128(plain_text, pos, NUM_CHARS_BLKSZ_128, cipher_state);
+    // while(pos < strlen(plain_text)) {
+    //     printf("\nPlaintext block is: %.*s\n", NUM_CHARS_BLKSZ_128, plain_text + pos);
+    //     ascii_to_hex_128(plain_text, pos, NUM_CHARS_BLKSZ_128, cipher_state);
+    //
+    //     printf("\nBefore subbytes\n");
+    //     pretty_print_hex_matrix(cipher_state);
+    //
+    //     printf("\nAfter subbytes\n");
+    //     sub_bytes_transform(cipher_state);
+    //     pretty_print_hex_matrix(cipher_state);
+    //
+    //     printf("\nAfter shift rows\n");
+    //     shift_rows(cipher_state);
+    //     pretty_print_hex_matrix(cipher_state);
+    //
+    //     pos += NUM_CHARS_BLKSZ_128;
+    //     memset(cipher_state, 0, sizeof(cipher_state));
+    // }
 
-        printf("\nBefore subbytes\n");
-        pretty_print_hex_matrix(cipher_state);
+    int i;
+    printf("\nRound 0 Key:\n");
+    pretty_print_hex_matrix(key_state);
+    for(i = 1; i <= AES_128_ROUNDS; i++) {
+        next_round_key(key_state, i);
 
-        printf("\nAfter subbytes\n");
-        sub_bytes_transform(cipher_state);
-        pretty_print_hex_matrix(cipher_state);
-
-        printf("\nAfter shift rows\n");
-        shift_rows(cipher_state);
-        pretty_print_hex_matrix(cipher_state);
-
-        pos += NUM_CHARS_BLKSZ_128;
-        memset(cipher_state, 0, sizeof(cipher_state));
+        printf("Round %d Key:\n", i);
+        pretty_print_hex_matrix(key_state);
     }
 
 
