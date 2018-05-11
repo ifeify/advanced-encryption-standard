@@ -5,6 +5,7 @@
 #define AES_128_ROUNDS 10
 #define TERMINAL_CHAR '\0'
 #define ERROR_COMMAND_LINE_ARGS -2
+#define TEST_BIT(number, bit_position)((number) & (1 << bit_position))
 
 #include <stdio.h>
 #include <unistd.h>
@@ -198,9 +199,120 @@ void add_round_key(unsigned char cipher_state[][STATE_MATRIX_SIZE], unsigned cha
     }
 }
 
-void aes_encrypt(unsigned char key_state[][STATE_MATRIX_SIZE], unsigned char cipher_state[][STATE_MATRIX_SIZE]) {
-    sub_bytes_transform(cipher_state);
-    shift_rows(cipher_state);
+char gf_multiply_one(unsigned char num) {
+    return num;
+}
+
+char gf_multiply_two(const unsigned char num) {
+    unsigned char val = num << 1;
+    // check if high end bit in a byte is 1
+    // 0x80 is 1000 0000 and is the same as bit shifting
+    // the number 1 seven times to the left
+    if((num & 0x80)) {
+        return val ^ 0x1B;
+    }
+    return val;
+}
+
+char gf_multiply_three(unsigned char num) {
+    // 3 = 2 ^ 1
+    return gf_multiply_two(num) ^ gf_multiply_one(num);
+}
+
+/**
+ * @param gf_constant - will either be 1, 2 or 3
+**/
+char gf_multiply(const unsigned char gf_constant, const unsigned char num) {
+    if(gf_constant == 0x01) {
+        return gf_multiply_one(num);
+    } else if(gf_constant == 0x02) {
+        return gf_multiply_two(num);
+    } else {
+        return gf_multiply_three(num);
+    }
+}
+
+/**
+ * @param row_ptr - is a pointer to the starting address of the row
+                    the cell to mix resides in (in a 2D array)
+ * @param row - is row number number of the cell to mix
+ * @param column - is the column number of the cell to mix
+**/
+char mix_column_cell(unsigned char state[][STATE_MATRIX_SIZE], int row, int column) {
+    return gf_multiply(GF_MATRIX[row][0], state[0][column])
+            ^ gf_multiply(GF_MATRIX[row][1], state[1][column])
+            ^ gf_multiply(GF_MATRIX[row][2], state[2][column])
+            ^ gf_multiply(GF_MATRIX[row][3], state[3][column]);
+}
+
+void mix_columns(unsigned char cipher_state[][STATE_MATRIX_SIZE]) {
+    int col;
+    char temp[STATE_MATRIX_SIZE] = {0, 0, 0, 0};
+
+    for(col = 0; col < STATE_MATRIX_SIZE; col++) {
+        temp[0] = mix_column_cell(cipher_state, 0, col);
+        temp[1] = mix_column_cell(cipher_state, 1, col);
+        temp[2] = mix_column_cell(cipher_state, 2, col);
+        temp[3] = mix_column_cell(cipher_state, 3, col);
+
+        // update current column before moving on
+        cipher_state[0][col] = temp[0];
+        cipher_state[1][col] = temp[1];
+        cipher_state[2][col] = temp[2];
+        cipher_state[3][col] = temp[3];
+    }
+}
+
+void aes_encrypt_block(unsigned char key_state[][STATE_MATRIX_SIZE], unsigned char cipher_state[][STATE_MATRIX_SIZE]) {
+    printf("\nRound 0 Key:\n");
+    pretty_print_hex_matrix(key_state);
+
+    printf("\nInitial plaintext:\n");
+    pretty_print_hex_matrix(cipher_state);
+
+    add_round_key(cipher_state, key_state);
+    printf("\nAfter first AddRoundKey:\n");
+    pretty_print_hex_matrix(cipher_state);
+
+    int round_number;
+    for(round_number = 1; round_number <= AES_128_ROUNDS; round_number++) {
+        next_round_key(key_state, round_number);
+        printf("\n****************************************************\n");
+        printf("Round %d Key is:\n", round_number);
+        pretty_print_hex_matrix(key_state);
+
+        if(round_number == AES_128_ROUNDS) { // MixColumns operation missing from last round
+            sub_bytes_transform(cipher_state);
+            printf("\nAfter subBytes transformation:\n");
+            pretty_print_hex_matrix(cipher_state);
+
+            shift_rows(cipher_state);
+            printf("\nAfter ShiftRows operation:\n");
+            pretty_print_hex_matrix(cipher_state);
+
+            add_round_key(cipher_state, key_state);
+            printf("\nAfter AddRoundKey operation:\n");
+            pretty_print_hex_matrix(cipher_state);
+        } else {
+            sub_bytes_transform(cipher_state);
+            printf("\nAfter subBytes transformation:\n");
+            pretty_print_hex_matrix(cipher_state);
+
+            shift_rows(cipher_state);
+            printf("\nAfter ShiftRows operation:\n");
+            pretty_print_hex_matrix(cipher_state);
+
+            mix_columns(cipher_state);
+            printf("\nAfter MixColumns operation:\n");
+            pretty_print_hex_matrix(cipher_state);
+
+            add_round_key(cipher_state, key_state);
+            printf("\nAfter AddRoundKey operation:\n");
+            pretty_print_hex_matrix(cipher_state);
+        }
+
+        printf("\n********************* End Round %d ***********************\n", round_number);
+    }
 }
 
 int main(int argc, char const *argv[]) {
@@ -213,7 +325,7 @@ int main(int argc, char const *argv[]) {
     // file to encrypt
     char* file_name = "";
 
-    unsigned char key_state[4][4];
+    unsigned char initial_key_state[4][4];
     unsigned char round_key[4][4];
     unsigned char cipher_state[4][4];
 
@@ -227,37 +339,26 @@ int main(int argc, char const *argv[]) {
     printf("\nEncryption key is %s and the plaintext is %s\n", key, plain_text);
 
     pad_string_128(key);
-    ascii_to_hex_128(key, 0, strlen(key), key_state);
+    ascii_to_hex_128(key, 0, strlen(key), initial_key_state);
 
     int pos = 0;
-    // take the plaintext 16 characters at a time since each AES block is 128 bits long
-    // while(pos < strlen(plain_text)) {
-    //     printf("\nPlaintext block is: %.*s\n", NUM_CHARS_BLKSZ_128, plain_text + pos);
-    //     ascii_to_hex_128(plain_text, pos, NUM_CHARS_BLKSZ_128, cipher_state);
-    //
-    //     printf("\nBefore subbytes\n");
-    //     pretty_print_hex_matrix(cipher_state);
-    //
-    //     printf("\nAfter subbytes\n");
-    //     sub_bytes_transform(cipher_state);
-    //     pretty_print_hex_matrix(cipher_state);
-    //
-    //     printf("\nAfter shift rows\n");
-    //     shift_rows(cipher_state);
-    //     pretty_print_hex_matrix(cipher_state);
-    //
-    //     pos += NUM_CHARS_BLKSZ_128;
-    //     memset(cipher_state, 0, sizeof(cipher_state));
-    // }
+    int block_number = 1;
+    // Take the plaintext 16 characters at a time since each AES block is 128 bits long
+    while(pos < strlen(plain_text)) {
+        printf("\nPlaintext block is: %.*s\n", NUM_CHARS_BLKSZ_128, plain_text + pos);
+        ascii_to_hex_128(plain_text, pos, NUM_CHARS_BLKSZ_128, cipher_state);
 
-    int i;
-    printf("\nRound 0 Key:\n");
-    pretty_print_hex_matrix(key_state);
-    for(i = 1; i <= AES_128_ROUNDS; i++) {
-        next_round_key(key_state, i);
+        printf("\nInitial plaintext state for block %d is:\n", block_number);
+        pretty_print_hex_matrix(cipher_state);
 
-        printf("Round %d Key:\n", i);
-        pretty_print_hex_matrix(key_state);
+        aes_encrypt_block(initial_key_state, cipher_state);
+
+        printf("\nFinal ciphertext for block %d is:\n", block_number);
+        pretty_print_hex_matrix(cipher_state);
+
+        block_number++;
+        pos += NUM_CHARS_BLKSZ_128;
+        memset(cipher_state, 0, sizeof(cipher_state));
     }
     return 0;
 }
